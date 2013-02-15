@@ -1,0 +1,22 @@
+Package: hiAnalyzer
+Title: Functions for analyzing and visualizing viral integration site data.
+Version: 0.1
+Date: 2012-08-16
+Author: Nirav V Malani <malnirav@gmail.com>
+Maintainer: Nirav V Malani <malnirav@gmail.com>
+Description: hiAnalyzer contains set of functions which allow users to analyze
+    and visualize viral integration site data. Most of the data used by this
+    package is an output of either hiAnnotator or hiReadsProcessor package.
+Depends:
+    ggbio,
+    scales,
+    gridExtra,
+    grid,
+    seqLogo,
+    RColorBrewer,
+    reshape,
+    dataframe
+License: GPL (>= 2)
+LazyLoad: yes
+Collate:
+    'plotTypes.R'
