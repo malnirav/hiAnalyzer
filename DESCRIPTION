@@ -14,8 +14,7 @@ Depends:
     grid,
     seqLogo,
     RColorBrewer,
-    reshape,
-    dataframe
+    reshape
 License: GPL (>= 2)
 LazyLoad: yes
 Collate:
