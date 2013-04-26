@@ -1,5 +1,8 @@
+export(getColors)
 export(plot.CircleIdeogram)
 export(plot.distToFeature)
+export(plot.inFeature)
+export(plot.siteLogo)
 import(RColorBrewer)
 import(dataframe)
 import(ggbio)
