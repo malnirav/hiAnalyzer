@@ -1,111 +1,85 @@
-#' Functions for analyzing and visualizing viral integration site data.
+#' Functions for analyzing and visualizing viral integration site or genomic data.
 #'
-#' hiAnalyzer contains set of functions which allow users to analyze and visualize viral integration site data. Most of the data used by this package is an output of either hiAnnotator or hiReadsProcessor package.
+#' hiAnalyzer contains set of functions which allow users to analyze and visualize viral integration site or genomic data. Most of the data used by this package is an output of either hiAnnotator or hiReadsProcessor package.
 #'
-#' @import ggbio scales gridExtra grid seqLogo RColorBrewer reshape dataframe
+#' @import ggbio scales gridExtra grid seqLogo RColorBrewer reshape hiAnnotator
 #' @docType package
 #' @name hiAnalyzer
 NULL
 
-#### genome plot ####
+#' Create a Circos styled genomic plot/ideogram.
+#'
+#' @param sites a GRanges object containing point genomic data with populated seqinfo slot. See \code{\link{makeGRanges}} for an easy way to do this!
+#' @param separateByCol a column name in sites by which additional tracks are generated. Default is "group".
+#' @param tracks a named list of GRanges object which serves as the target/reference/scaffold for data in sites object. Default is NULL. Example: list("genes"=genes.rd, "CpG"=cpgs.rd)
+#' @param clusterSitesBin numeric bin size used to cluster data in sites. Default is NULL
+#' @param clusterTracksBin numeric bin size used to cluster data in each object of tracks. Default is NULL
+#' @param pointSize numeric value for the size of a point to denote a row in sites object. Default is 0.5. Not used if clusterSitesBin is defined, which in turn makes a bar plot.
+#' @param title Title of the plot. Default is blank.
+#'
+#' @seealso \code{\link{plot.siteLogo}}, \code{\link{plot.distToFeature}}, 
+#' \code{\link{plot.inFeature}}, \code{\link{getColors}}, \code{\link{makeGRanges}}
+#'
 #' @export
-plot.CircleIdeogram <- function(sites, separateByCol = "Alias", freeze = "hg18", pointSize = 0.5, 
-                                yAxisScatter = NULL, title = "", clusterSitesBin = NULL, adjustTracks = TRUE, dbcon = NULL) {
-  stopifnot(nrow(sites) > 0)
-  require(hiAnnotator)
+#'
+#' @examples
+plot.CircleIdeogram <- function(sites, separateByCol = "group", tracks = NULL, 
+                                clusterSitesBin = NULL, clusterTracksBin = NULL,
+                                pointSize = 0.5, title = "") {
+  stopifnot(length(sites) > 0 | is(sites,"GRanges"))
+  stopifnot(length(tracks) > 0 | all(sapply(tracks, is, class2="GRanges")))
   
-  dbconDisconnect <- FALSE
-  if (is.null(dbcon)) {
-    dbconDisconnect <- TRUE
-    dbcon <- connectToIntSitesDB()
+  # cluster sites & tracks to reduce amount of data getting plotted #
+  if(!is.null(clusterTracksBin)) {
+    tracks <- sapply(tracks, 
+                     function(x) {
+                       x <- sort(x)
+                       strand(x) <- "*"
+                       x.reduced <- reduce(x, min.gapwidth = clusterTracksBin)
+                       mcols(x.reduced)$counts <- countOverlaps(x.reduced, x, 
+                                                                 ignore.strand = T)
+                       mcols(x.reduced)$logCount <- log(mcols(x.reduced)$counts)
+                       x.reduced
+                     }, simplify=F)    
   }
   
-  # get tracks #
-  sites.gr <- as(makeRangedData(subset(sites, type == "insertion"), soloStart = TRUE, 
-                                chromCol = "Chr"), "GRanges")
-  genes <- as(makeRangedData(unique(dbGetQuery(dbcon, paste("select * from ", freeze, 
-                                                            ".refflat", sep = ""))[, 3:6])), "GRanges")
-  freeze.gr <- as(makeRangedData(unique(dbGetQuery(dbcon, paste("select chrom, 1 as start, size as end ,'*' as strand from ", 
-                                                                freeze, ".chrominfo", sep = "")))), "GRanges")
-  seqlengths(freeze.gr) <- end(freeze.gr)
-  seqorder <- sapply(strsplit(gsub("chr", "", seqlevels(freeze.gr)), "\\_"), "[[", 
-                     1)
-  freeze.gr <- freeze.gr[order(as.numeric(seqorder))]
-  seqlevels(freeze.gr) <- seqlevels(freeze.gr)[order(as.numeric(seqorder))]
-  
-  if (dbconDisconnect) {
-    dbDisconnect(dbcon)
-  }
-  
-  # reorder chromosome names, add sizes, and do basic formating if any #
-  seqlevels(sites.gr) <- seqlevels(freeze.gr)[seqlevels(freeze.gr) %in% seqlevels(sites.gr)]
-  seqlengths(sites.gr) <- seqlengths(freeze.gr)[seqlevels(freeze.gr) %in% seqlevels(sites.gr)]
-  seqlevels(genes) <- seqlevels(freeze.gr)[seqlevels(freeze.gr) %in% seqlevels(genes)]
-  seqlengths(genes) <- seqlengths(freeze.gr)[seqlevels(freeze.gr) %in% seqlevels(genes)]
-  freeze.gr <- keepSeqlevels(freeze.gr, seqlevels(sites.gr))
-  genes <- keepSeqlevels(genes, seqlevels(sites.gr))
-  
-  newnames <- structure(gsub("chr", "", seqlevels(freeze.gr)), names = seqlevels(freeze.gr))
-  freeze.gr <- renameSeqlevels(freeze.gr, newnames)
-  sites.gr <- renameSeqlevels(sites.gr, newnames)
-  genes <- renameSeqlevels(genes, newnames)
-  
-  values(freeze.gr)$Chr <- as.character(seqnames(freeze.gr))
-  
-  # cluster genes to reduce amount of data getting plotted #
-  genes <- genes[order(genes)]
-  strand(genes) <- "*"
-  genes.reduced <- reduce(genes, min.gapwidth = 1e+05)
-  values(genes.reduced)$counts <- countOverlaps(genes.reduced, genes, ignore.strand = T)
-  values(genes.reduced)$logCount <- log(values(genes.reduced)$counts)
-  rm(genes)
-  
-  # cluster sites if defined #
   asBars <- FALSE
   if (!is.null(clusterSitesBin)) {
     asBars <- TRUE
-    sites.list <- sites.gr
-    strand(sites.list) <- "*"
-    values(sites.list) <- NULL
-    sites.list <- split(sites.list, values(sites.gr)[, separateByCol])
-    sites.reduced <- GRanges()
-    for (x in names(sites.list)) {
-      reduced <- reduce(sites.list[[x]], min.gapwidth = clusterSitesBin)
-      values(reduced)[, separateByCol] <- x
-      values(reduced)$counts <- countOverlaps(reduced, sites.list[[x]], ignore.strand = T)
-      sites.reduced <- c(sites.reduced, reduced)
-    }
-    sites.gr <- sites.reduced
-    values(sites.gr)$logCount <- log(values(sites.gr)$counts)
-    rm("sites.list", "sites.reduced", "reduced")
+    sites <- sapply(split(sites, mcols(sites)[[separateByCol]]), 
+                    function(x) {
+                      x <- sort(x)
+                      strand(x) <- "*"
+                      mcols(x) <- NULL
+                      x.reduced <- reduce(x, min.gapwidth = clusterSitesBin)
+                      mcols(x.reduced)$counts <- countOverlaps(x.reduced, x, 
+                                                                ignore.strand = T)
+                      mcols(x.reduced)$logCount <- log(mcols(x.reduced)$counts)
+                      x.reduced
+                    }, simplify=F) 
   }
   
-  ## make the plot ##
-  tracks <- sort(unique(values(sites.gr)[, separateByCol]))
-  dataset <- structure(c("#FF0000", getColors(length(tracks))), names = c("Genes", tracks))
+  tracks <- c(tracks,sites)
   
-  if (adjustTracks) {
-    track.radius <- structure(seq(23, pmax(23/length(tracks), 2), length = length(tracks)), 
-                              names = tracks)
-  } else {
-    rads <- seq(23, 2, by = -4.5)
-    if (length(rads) < length(tracks)) {
-      stop("No enough space available to plot all the tracks. Try using adjustTracks=TRUE")
-    }
-    track.radius <- structure(rads[1:length(tracks)], names = tracks)
-  }
+  ## pick the object with the most seqnames to serve as the scaffold ##
+  freeze.gr <- 
   
-  p <- ggplot() + layout_circle(freeze.gr, geom = "ideo", fill = "gray70", radius = 34, 
-                                trackWidth = 2)
-  p <- p + layout_circle(freeze.gr, geom = "scale", size = 2, radius = 36, trackWidth = 2)
-  p <- p + layout_circle(freeze.gr, geom = "text", aes(label = Chr), vjust = 0, radius = 38, 
-                         trackWidth = 7)
-  p <- p + layout_circle(genes.reduced, aes(y = logCount), geom = "bar", fill = "#FF0000", 
-                         color = "red", radius = 28, trackWidth = 6, size = 0.2)
+  ## make the plot scaffold ##
+  dataset <- structure(getColors(length(tracks)), names = names(tracks))
+  track.radius <- structure(seq(28, pmax(28/length(tracks), 2), length = length(tracks)), 
+                            names = names(tracks))
   
-  # make a track per separateByCol from sites.gr #
+  p <- ggplot()
+  p <- p + layout_circle(freeze.gr, geom = "ideo", fill = "gray70", 
+                         radius = 34, trackWidth = 2)
+  p <- p + layout_circle(freeze.gr, geom = "scale", size = 2, 
+                         radius = 36, trackWidth = 2)
+  p <- p + layout_circle(freeze.gr, geom = "text", aes(label = Chr), vjust = 0, 
+                         radius = 38, trackWidth = 7)
+  
+  # add tracks #
   for (f in tracks) {
-    dat <- subset(sites.gr, values(sites.gr)[, separateByCol] == f)
+    dat <- subset(sites.gr, mcols(sites.gr)[[separateByCol]] == f)
     if (asBars) {
       p <- p + layout_circle(dat, aes(y = logCount), geom = "bar", fill = dataset[[f]], 
                              color = dataset[[f]], radius = track.radius[[f]], trackWidth = 6, size = 0.2)
@@ -121,8 +95,10 @@ plot.CircleIdeogram <- function(sites, separateByCol = "Alias", freeze = "hg18",
   }
   p <- p + theme(title = title)
   
-  test <- qplot(data = data.frame(Track = factor(names(dataset), levels = names(dataset))), 
-                1, Track, fill = Track, geom = "tile") + scale_fill_manual(values = dataset)
+  test <- qplot(data = data.frame(Track = factor(names(dataset), 
+                                                 levels = names(dataset))), 
+                1, Track, fill = Track, geom = "tile") + 
+    scale_fill_manual(values = dataset)
   tmp <- ggplot_gtable(ggplot_build(test))
   leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
   legend <- tmp$grobs[[leg]]
@@ -133,11 +109,13 @@ plot.CircleIdeogram <- function(sites, separateByCol = "Alias", freeze = "hg18",
 
 #### weblogo plot ####
 #' @export
-plot.siteLogo <- function(seqs, samples, traditional = FALSE, ZeroCentered = TRUE, themes = NULL) {
+plot.siteLogo <- function(seqs, samples, traditional = FALSE, ZeroCentered = TRUE, 
+                          themes = NULL) {
   seqs <- split(as.character(seqs), as.character(samples))
   
-  dat <- sapply(seqs, function(x) consensusMatrix(DNAStringSet(x), as.prob = T)[1:4, 
-                                                                                ], simplify = F)
+  dat <- sapply(seqs, 
+                function(x) consensusMatrix(DNAStringSet(x), as.prob = T)[1:4,], 
+                simplify = F)
   if (ZeroCentered) {
     dat <- lapply(dat, function(x) {
       newones <- seq(-(ncol(x)/2), (ncol(x)/2), by = 1)
@@ -153,13 +131,16 @@ plot.siteLogo <- function(seqs, samples, traditional = FALSE, ZeroCentered = TRU
     })
   } else {
     melted <- do.call(rbind, lapply(names(dat), function(x) {
-      cbind(samples = x, melt(cbind(as.data.frame(dat[[x]]), base = rownames(dat[[x]])), 
+      cbind(samples = x, melt(cbind(as.data.frame(dat[[x]]), 
+                                    base = rownames(dat[[x]])), 
                               id = "base"))
     }))
     melted$variable <- gsub("V", "", melted$variable)
-    melted$variable <- factor(melted$variable, levels = as.character(sort(unique(as.numeric(melted$variable)))))
-    p <- qplot(data = melted, variable, value, geom = "line", colour = base, group = base, 
-               xlab = "Position") + scale_y_continuous("Percent of Sequences", label = percent) + 
+    melted$variable <- factor(melted$variable, 
+                              levels = as.character(sort(unique(as.numeric(melted$variable)))))
+    p <- qplot(data = melted, variable, value, geom = "line", colour = base, 
+               group = base, xlab = "Position") + 
+      scale_y_continuous("Percent of Sequences", label = percent) + 
       facet_wrap(~samples, ncol = 1)
     
     if (!is.null(themes)) {
@@ -172,8 +153,9 @@ plot.siteLogo <- function(seqs, samples, traditional = FALSE, ZeroCentered = TRU
 
 #### Distance to TSS plot ####
 #' @export
-plot.distToFeature <- function(dat, brks, byCol, annotCol, ratioMRC = FALSE, discreteBins = TRUE, 
-                               themes = NULL, printPlotData = FALSE, bw = FALSE) {
+plot.distToFeature <- function(dat, brks, byCol, annotCol, ratioMRC = FALSE, 
+                               discreteBins = TRUE, themes = NULL, 
+                               printPlotData = FALSE, bw = FALSE) {
   counts.df <- as.data.frame(xtabs(~type + get(byCol), dat, drop = T))
   names(counts.df)[2:3] <- c(byCol, "Total")
   plot.frame <- as.data.frame(xtabs(~cut(dat[, annotCol], brks, include.lowest = T, 
