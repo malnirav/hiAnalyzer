@@ -43,6 +43,7 @@ plot.CircleIdeogram <- function(sites, separateByCol = "group", tracks = NULL,
                      }, simplify=F)    
   }
   
+  # cluster sites if defined #
   asBars <- FALSE
   if (!is.null(clusterSitesBin)) {
     asBars <- TRUE
@@ -114,8 +115,10 @@ plot.siteLogo <- function(seqs, samples, traditional = FALSE, ZeroCentered = TRU
   seqs <- split(as.character(seqs), as.character(samples))
   
   dat <- sapply(seqs, 
-                function(x) consensusMatrix(DNAStringSet(x), as.prob = T)[1:4,], 
-                simplify = F)
+                function(x) consensusMatrix(DNAStringSet(x[!is.na(x)]),
+                                            as.prob = T)[c("A","C","G","T"),], 
+                simplify = FALSE)
+  
   if (ZeroCentered) {
     dat <- lapply(dat, function(x) {
       newones <- seq(-(ncol(x)/2), (ncol(x)/2), by = 1)
@@ -131,15 +134,16 @@ plot.siteLogo <- function(seqs, samples, traditional = FALSE, ZeroCentered = TRU
     })
   } else {
     melted <- do.call(rbind, lapply(names(dat), function(x) {
-      cbind(samples = x, melt(cbind(as.data.frame(dat[[x]]), 
+      cbind(samples = x, melt(cbind(as.data.frame(dat[[x]]),
                                     base = rownames(dat[[x]])), 
                               id = "base"))
     }))
     melted$variable <- gsub("V", "", melted$variable)
     melted$variable <- factor(melted$variable, 
                               levels = as.character(sort(unique(as.numeric(melted$variable)))))
-    p <- qplot(data = melted, variable, value, geom = "line", colour = base, 
-               group = base, xlab = "Position") + 
+    p <- qplot(data = melted, variable, value, geom = "line", 
+               colour = base, group = base, 
+               xlab = "Position") + 
       scale_y_continuous("Percent of Sequences", label = percent) + 
       facet_wrap(~samples, ncol = 1)
     
@@ -172,22 +176,22 @@ plot.distToFeature <- function(dat, brks, byCol, annotCol, ratioMRC = FALSE,
     res <- droplevels(subset(merge(plot.frame, ratiosCalc, all.x = T), type == "insertion"))
     if (!discreteBins) {
       p <- qplot(data = res, Dist.To.TSS, RatioMRC, geom = "bar", stat = "identity", 
-                 position = "dodge", fill = get(byCol)) + scale_x_continuous("Distance", 
+                 position = ifelse(stacked,"stack","dodge"), fill = get(byCol)) + scale_x_continuous("Distance", 
                                                                              expand = c(0, 0))
     } else {
       p <- qplot(data = res, Distance, RatioMRC, geom = "bar", stat = "identity", 
-                 position = "dodge", fill = get(byCol)) + scale_x_discrete("Distance", 
+                 position = ifelse(stacked,"stack","dodge"), fill = get(byCol)) + scale_x_discrete("Distance", 
                                                                            expand = c(0, 0))
     }
     p <- p + scale_y_continuous("Ratio Insertions/Matches", expand = c(0, 0))
   } else {
     if (!discreteBins) {
       p <- qplot(data = plot.frame, Dist.To.TSS, Percent, geom = "bar", stat = "identity", 
-                 position = "dodge", fill = get(byCol)) + scale_x_continuous("Distance", 
+                 position = ifelse(stacked,"stack","dodge"), fill = get(byCol)) + scale_x_continuous("Distance", 
                                                                              expand = c(0, 0))
     } else {
       p <- qplot(data = plot.frame, Distance, Percent, geom = "bar", stat = "identity", 
-                 position = "dodge", fill = get(byCol)) + scale_x_discrete("Distance", 
+                 position = ifelse(stacked,"stack","dodge"), fill = get(byCol)) + scale_x_discrete("Distance", 
                                                                            expand = c(0, 0))
     }
     p <- p + scale_y_continuous("Percent of Sites", label = percent, expand = c(0, 
